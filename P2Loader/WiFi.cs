@@ -20,16 +20,14 @@ namespace P2Loader
         private const uint ENABLE_VIRTUAL_TERMINAL_PROCESSING = 0x0004;
         private const uint DISABLE_NEWLINE_AUTO_RETURN = 0x0008;
 
-        static byte[] program;
-        static string PropHex = "> Prop_Hex 0 0 0 0";
-        static string PropTxt = "> Prop_Txt 0 0 0 0 ";
-        static string PropClk = "> Prop_Clk 0 0 0 0 ";
-        static string PropChk = "> Prop_Chk 0 0 0 0  ";
         TcpClient tcpClient;
         TcpClient Telnet;
         static byte[] Data = new byte[4096];
         static NetworkStream NS;
         static NetworkStream TS;
+        ELF e;
+        public static byte[] program;
+
 
         [DllImport("kernel32.dll")]
         static extern bool GetConsoleMode(IntPtr hConsoleHandle, out uint lpMode);
@@ -52,13 +50,31 @@ namespace P2Loader
             ESP esp = null;
             List<ESP> W;
 
-            if (!File.Exists(filename))
-            {
-                Console.WriteLine("File {0} Not Found!", filename);
-                return;
-            }
+            program = File.ReadAllBytes(filename);
 
             program = File.ReadAllBytes(filename);
+            for (i = 0; i < Program.elf.Length; i++)
+            {
+                if (program[i] != Program.elf[i])
+                    break;
+            }
+
+            if (i == Program.elf.Length)
+            {
+                e = new ELF(program);
+
+                program = e.getProgram(program);
+            }
+
+            // patch frequency and baud rate (baud < 921600)
+            if (Program.Patch)
+            {
+                ValueConvert.ValueCopy(program, ValueConvert._clkfreq, Program.frequency * 1000000);
+                ValueConvert.ValueCopy(program, ValueConvert._clkmode, Program.mode);
+                ValueConvert.ValueCopy(program, ValueConvert._baudrate, Program.baud);
+            }
+
+            System.Console.WriteLine(string.Format("Loading {0} bytes.", program.Length));
 
             if ((Port.Substring(0, 1).CompareTo("0") >= 0) && (Port.Substring(0, 1).CompareTo("9") <= 0))
             {
@@ -96,7 +112,7 @@ namespace P2Loader
             b = Encoding.UTF8.GetBytes("GET /propeller/reset HTTP/1.1\r\n\r\n");
             NS.Write(b, 0, b.Length);
             Thread.Sleep(50);
-            b = Encoding.UTF8.GetBytes(PropChk);
+            b = Encoding.UTF8.GetBytes(Program.PropChk);
             TS.Write(b, 0, b.Length);
             if (NS.DataAvailable)
             {
@@ -123,7 +139,7 @@ namespace P2Loader
             /*
              * Send Base64 Encoding Program
             */
-            b = Encoding.UTF8.GetBytes(PropTxt);
+            b = Encoding.UTF8.GetBytes(Program.PropTxt);
             TS.Write(b, 0, b.Length);
 
             s = Convert.ToBase64String(program);

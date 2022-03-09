@@ -18,11 +18,8 @@ namespace P2Loader
 
         static SerialPort port;
         static byte[] Data = new byte[4096];
-        static string PropHex = "> Prop_Hex 0 0 0 0";
-        static string PropTxt = "> Prop_Txt 0 0 0 0 ";
-        static string PropClk = "> Prop_Clk 0 0 0 0 ";
-        static string PropChk = "> Prop_Chk 0 0 0 0  ";
         byte[] program;
+        ELF e;
 
         [DllImport("kernel32.dll")]
         static extern bool GetConsoleMode(IntPtr hConsoleHandle, out uint lpMode);
@@ -42,6 +39,29 @@ namespace P2Loader
             int i;
 
             program = File.ReadAllBytes(FileName);
+            for (i = 0;i< Program.elf.Length;i++)
+            {
+                if (program[i] != Program.elf[i])
+                    break;
+            }
+            
+            if (i == Program.elf.Length)
+            {
+                e = new ELF(program);
+
+                program = e.getProgram(program);
+                //File.WriteAllBytes("file.bin", program);
+            }
+
+            // patch frequency and baud rate
+            if (Program.Patch)
+            {
+                ValueConvert.ValueCopy(program, ValueConvert._clkfreq, Program.frequency * 1000000);
+                ValueConvert.ValueCopy(program, ValueConvert._clkmode, Program.mode);
+                ValueConvert.ValueCopy(program, ValueConvert._baudrate, Program.baud);
+            }
+
+            System.Console.WriteLine(string.Format("Loading {0} bytes.", program.Length));
 
             port = new SerialPort(portname, 2000000);
             port.Open();
@@ -54,7 +74,7 @@ namespace P2Loader
             /*
              * Check if Propeller is there
              */
-            port.WriteLine(PropChk);
+            port.WriteLine(Program.PropChk);
             Thread.Sleep(100);
             if (port.BytesToRead == 0)
             {
@@ -78,9 +98,11 @@ namespace P2Loader
              * Send Base64 Encoding Program
              */
             s = Convert.ToBase64String(program);
-            port.Write(PropTxt);
+            i = s.Length;
+            port.Write(Program.PropTxt);
             port.Write(s);
             port.Write(" ~");
+            i = port.BytesToWrite;
             if (port.BytesToRead > 0)
             {
                 port.Read(Data, 0, port.BytesToRead);
@@ -110,7 +132,7 @@ namespace P2Loader
         static void Terminal(string filename)
         {
             ConsoleKeyInfo key;
-            char[] c = new char[1];
+            char[] c = new char[128];
             string s;
             int i;
             bool Ok = true;
@@ -132,15 +154,14 @@ namespace P2Loader
             }
 
             Console.WriteLine("Entering terminal mode.  Press Ctrl-] to exit. ");
-            port.BaudRate = 230400;
+            port.BaudRate = Program.baud;
             Console.Title = filename;
 
-            c[0] = (char)0;
+            i = 0;
             while (Ok)
             {
-                if (c[0] > 0)
-                    port.Write(c, 0, 1);
-                c[0] = (char)0;
+                if (i > 0)
+                    port.Write(c, 0, i);
                 i = port.BytesToRead;
                 if (i > 0)
                 {
@@ -148,11 +169,12 @@ namespace P2Loader
                     s = Encoding.UTF8.GetString(Data, 0, i);
                     Console.Write(s);
                 }
-                if (Console.KeyAvailable)
+                i = 0;
+                while (Console.KeyAvailable)
                 {
                     key = Console.ReadKey(true);
-                    c[0] = key.KeyChar;
-                    if (c[0] == 29)
+                    c[i] = key.KeyChar;
+                    if ((c[i] == 29) || (c[i++] == 26))
                         Ok = false;
                 }
             }
